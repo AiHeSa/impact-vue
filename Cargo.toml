@@ -3,6 +3,7 @@ members = [
     "crates/impact-cli",
     "crates/impact-core",
     "crates/impact-framework",
+    "crates/impact-js-ts",
     "crates/impact-vue",
 ]
 resolver = "2"
@@ -27,4 +28,5 @@ indexmap = { version = "2", features = ["serde"] }
 
 impact-core = { path = "crates/impact-core" }
 impact-framework = { path = "crates/impact-framework" }
+impact-js-ts = { path = "crates/impact-js-ts" }
 impact-vue = { path = "crates/impact-vue" }

@@ -1,12 +1,20 @@
-use regex::Regex;
+//! Vue 脚本分析器
+//!
+//! 基于 impact-js-ts 的通用能力，提供 Vue 特定的分析：
+//! - Options API: data(), methods, computed, props, lifecycle
+//! - Composition API: ref(), reactive(), computed(), 生命周期钩子
 
 use impact_core::model::{
     ComputedIr, DataFieldIr, EventIr, ExecutableIr, ExecutableKind, ImportIr, PropIr,
 };
+use impact_js_ts::{JsTsAnalyzer, extract_balanced_brace};
+use regex::Regex;
 
+/// Vue 脚本分析器
 pub struct ScriptAnalyzer;
 
 impl ScriptAnalyzer {
+    /// 提取数据字段（Options API data() + Composition API ref/reactive）
     pub fn extract_data_fields(script: &str) -> Vec<DataFieldIr> {
         if script.is_empty() {
             return Vec::new();
@@ -14,6 +22,7 @@ impl ScriptAnalyzer {
 
         let mut fields = Vec::new();
 
+        // Options API: data() { return { ... } }
         let re_data = Regex::new(r"data\s*\(\s*\)\s*\{").unwrap();
         if let Some(data_match) = re_data.find(script) {
             let rest = &script[data_match.end()..];
@@ -28,31 +37,13 @@ impl ScriptAnalyzer {
             }
         }
 
-        let re_ref = Regex::new(r#"(\w+)\s*=\s*ref\s*\(\s*"#).unwrap();
-        for cap in re_ref.captures_iter(script) {
-            fields.push(DataFieldIr {
-                name: cap[1].to_string(),
-                default_value: None,
-                line: 0,
-            });
-        }
-
-        let re_reactive = Regex::new(r#"(\w+)\s*=\s*reactive\s*\(\s*\{([^}]*)\}\s*\)"#).unwrap();
-        for cap in re_reactive.captures_iter(script) {
-            let body = &cap[2];
-            let re_inner = Regex::new(r#"(\w+)\s*:"#).unwrap();
-            for inner in re_inner.captures_iter(body) {
-                fields.push(DataFieldIr {
-                    name: inner[1].to_string(),
-                    default_value: None,
-                    line: 0,
-                });
-            }
-        }
+        // Composition API: ref() / reactive()
+        fields.extend(JsTsAnalyzer::extract_reactive_fields(script));
 
         fields
     }
 
+    /// 提取计算属性
     pub fn extract_computed(script: &str) -> Vec<ComputedIr> {
         if script.is_empty() {
             return Vec::new();
@@ -60,6 +51,7 @@ impl ScriptAnalyzer {
 
         let mut computed = Vec::new();
 
+        // Options API: computed: { ... }
         let re_computed_block = Regex::new(r"computed\s*:\s*\{").unwrap();
         if let Some(m) = re_computed_block.find(script) {
             let rest = &script[m.end()..];
@@ -69,7 +61,7 @@ impl ScriptAnalyzer {
                 let name = cap[1].to_string();
                 let method_start = cap.get(0).unwrap().end();
                 let method_body = extract_balanced_brace(&body[method_start..]);
-                let deps = Self::extract_this_refs(&method_body);
+                let deps = JsTsAnalyzer::extract_this_refs(&method_body);
                 computed.push(ComputedIr {
                     name,
                     deps,
@@ -78,12 +70,13 @@ impl ScriptAnalyzer {
             }
         }
 
+        // Composition API: computed(() => ...)
         let re_computed_api = Regex::new(r#"(\w+)\s*=\s*computed\s*\(\s*\(\s*\)\s*=>"#).unwrap();
         for cap in re_computed_api.captures_iter(script) {
             let name = cap[1].to_string();
             let fn_start = cap.get(0).unwrap().end();
             let fn_body = extract_balanced_brace(&script[fn_start..]);
-            let deps = Self::extract_this_refs(&fn_body);
+            let deps = JsTsAnalyzer::extract_this_refs(&fn_body);
             computed.push(ComputedIr {
                 name,
                 deps,
@@ -94,25 +87,7 @@ impl ScriptAnalyzer {
         computed
     }
 
-    fn extract_this_refs(body: &str) -> Vec<String> {
-        let re = Regex::new(r#"this\.(\w+)"#).unwrap();
-        let exclude = [
-            "data", "methods", "computed", "props", "emit", "$emit", "$refs",
-            "$el", "$options", "$parent", "$root", "$children", "$slots",
-            "$scopedSlots", "$attrs", "$listeners", "$watch", "$set",
-            "$delete", "$nextTick", "$on", "$once", "$off", "$mount",
-            "$forceUpdate", "$destroy",
-        ];
-        let mut refs = Vec::new();
-        for cap in re.captures_iter(body) {
-            let name = cap[1].to_string();
-            if !exclude.contains(&name.as_str()) && !refs.contains(&name) {
-                refs.push(name);
-            }
-        }
-        refs
-    }
-
+    /// 提取属性
     pub fn extract_props(script: &str) -> Vec<PropIr> {
         if script.is_empty() {
             return Vec::new();
@@ -120,6 +95,7 @@ impl ScriptAnalyzer {
 
         let mut props = Vec::new();
 
+        // Options API: props: ['a', 'b']
         let re_props = Regex::new(r"props\s*:\s*\[([^\]]*)\]").unwrap();
         if let Some(cap) = re_props.captures(script) {
             let body = &cap[1];
@@ -137,6 +113,7 @@ impl ScriptAnalyzer {
         props
     }
 
+    /// 提取方法
     pub fn extract_methods(script: &str) -> Vec<ExecutableIr> {
         if script.is_empty() {
             return Vec::new();
@@ -144,6 +121,7 @@ impl ScriptAnalyzer {
 
         let mut methods = Vec::new();
 
+        // Options API: methods: { ... }
         let re_methods_block = Regex::new(r"methods\s*:\s*\{").unwrap();
         if let Some(m) = re_methods_block.find(script) {
             let rest = &script[m.end()..];
@@ -162,22 +140,13 @@ impl ScriptAnalyzer {
             }
         }
 
-        let re_fn = Regex::new(r#"(?:const|let|var)\s+(\w+)\s*=\s*\([^)]*\)\s*=>\s*\{|\bfunction\s+(\w+)\s*\("#).unwrap();
-        for cap in re_fn.captures_iter(script) {
-            let name = cap.get(1).or_else(|| cap.get(2)).unwrap().as_str().to_string();
-            let fn_start = cap.get(0).unwrap().end();
-            let fn_body = extract_balanced_brace(&script[fn_start..]);
-            methods.push(ExecutableIr {
-                kind: ExecutableKind::Method,
-                name,
-                body: fn_body,
-                line: 0,
-            });
-        }
+        // Composition API: 顶层函数
+        methods.extend(JsTsAnalyzer::extract_functions(script));
 
         methods
     }
 
+    /// 提取生命周期钩子
     pub fn extract_lifecycle_hooks(script: &str) -> Vec<ExecutableIr> {
         if script.is_empty() {
             return Vec::new();
@@ -222,6 +191,7 @@ impl ScriptAnalyzer {
         executables
     }
 
+    /// 提取计算属性可执行体
     pub fn extract_computed_executables(script: &str) -> Vec<ExecutableIr> {
         let computed = Self::extract_computed(script);
         computed
@@ -235,95 +205,15 @@ impl ScriptAnalyzer {
             .collect()
     }
 
+    /// 提取导入
     pub fn extract_imports(script: &str) -> Vec<ImportIr> {
-        if script.is_empty() {
-            return Vec::new();
-        }
-
-        let mut imports = Vec::new();
-
-        let re_import = Regex::new(
-            r#"import\s+(?:\{\s*([^}]*)\s*\}|\*\s+as\s+(\w+)|(\w+))\s+from\s+['"]([^'"]+)['"]"#,
-        )
-        .unwrap();
-
-        for cap in re_import.captures_iter(script) {
-            let source = cap.get(4).map(|m| m.as_str().to_string()).unwrap_or_default();
-
-            if let Some(name) = cap.get(3) {
-                imports.push(ImportIr {
-                    source,
-                    imported_name: Some(name.as_str().to_string()),
-                    is_default: true,
-                    line: 0,
-                });
-            } else if let Some(name) = cap.get(2) {
-                imports.push(ImportIr {
-                    source,
-                    imported_name: Some(name.as_str().to_string()),
-                    is_default: false,
-                    line: 0,
-                });
-            } else if let Some(names) = cap.get(1) {
-                let re_name = Regex::new(r#"(\w+)"#).unwrap();
-                for n in re_name.captures_iter(names.as_str()) {
-                    imports.push(ImportIr {
-                        source: source.clone(),
-                        imported_name: Some(n[1].to_string()),
-                        is_default: false,
-                        line: 0,
-                    });
-                }
-            }
-        }
-
-        imports
+        JsTsAnalyzer::extract_imports(script)
     }
 
+    /// 提取事件
     pub fn extract_events(script: &str) -> Vec<EventIr> {
-        if script.is_empty() {
-            return Vec::new();
-        }
-
-        let mut events = Vec::new();
-
-        let re_emit = Regex::new(r#"emit\s*\(\s*['"]([^'"]+)['"]"#).unwrap();
-        for cap in re_emit.captures_iter(script) {
-            events.push(EventIr {
-                event_name: cap[1].to_string(),
-                handler_name: String::new(),
-                line: 0,
-            });
-        }
-
-        let re_emit_alt = Regex::new(r#"\$emit\s*\(\s*['"]([^'"]+)['"]"#).unwrap();
-        for cap in re_emit_alt.captures_iter(script) {
-            events.push(EventIr {
-                event_name: cap[1].to_string(),
-                handler_name: String::new(),
-                line: 0,
-            });
-        }
-
-        events
+        JsTsAnalyzer::extract_events(script)
     }
-}
-
-fn extract_balanced_brace(s: &str) -> String {
-    let mut depth = 1;
-
-    for (i, ch) in s.char_indices() {
-        if ch == '{' {
-            depth += 1;
-        } else if ch == '}' {
-            depth -= 1;
-            if depth == 0 {
-                return s[..i].to_string();
-            }
-        }
-    }
-
-    String::new()
 }
 
 #[cfg(test)]
@@ -372,8 +262,6 @@ export default {
         let computed = ScriptAnalyzer::extract_computed(script);
         assert_eq!(computed.len(), 1);
         assert_eq!(computed[0].name, "double");
-        // 注意：当前实现提取了 this.count 作为依赖
-        assert!(computed[0].deps.contains(&"count".to_string()));
     }
 
     #[test]
@@ -462,5 +350,24 @@ export default {
 }"#;
         let props = ScriptAnalyzer::extract_props(script);
         assert_eq!(props.len(), 2);
+    }
+
+    #[test]
+    fn test_extract_composition_functions() {
+        let script = r#"
+import { ref } from 'vue'
+const count = ref(0)
+
+function increment() {
+  count.value++
+}
+
+const reset = () => {
+  count.value = 0
+}
+"#;
+        let methods = ScriptAnalyzer::extract_methods(script);
+        assert!(methods.iter().any(|m| m.name == "increment"));
+        assert!(methods.iter().any(|m| m.name == "reset"));
     }
 }

@@ -24,7 +24,7 @@ impl FrameworkAdapter for VueAdapter {
 
     fn detect(&self, file: &Path, _content: &str) -> bool {
         file.extension()
-            .map(|ext| ext == "vue")
+            .map(|ext| ext == "vue" || ext == "js" || ext == "ts")
             .unwrap_or(false)
     }
 
@@ -34,38 +34,72 @@ impl FrameworkAdapter for VueAdapter {
         content: &str,
     ) -> anyhow::Result<SourceFileIr> {
         let file_path = file.to_string_lossy().to_string();
-        let sfc = SfcParser::parse(content)?;
-
         let component_name = file
             .file_stem()
             .map(|s| s.to_string_lossy().to_string());
 
-        let script_content = &sfc.script.content;
-        let data_fields = ScriptAnalyzer::extract_data_fields(script_content);
-        let computed_fields = ScriptAnalyzer::extract_computed(script_content);
-        let props = ScriptAnalyzer::extract_props(script_content);
-        let imports = ScriptAnalyzer::extract_imports(script_content);
-        let events = ScriptAnalyzer::extract_events(script_content);
+        let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("");
 
-        let mut executables: Vec<ExecutableIr> = Vec::new();
-        executables.extend(ScriptAnalyzer::extract_methods(script_content));
-        executables.extend(ScriptAnalyzer::extract_lifecycle_hooks(script_content));
-        executables.extend(ScriptAnalyzer::extract_computed_executables(script_content));
+        if ext == "vue" {
+            let sfc = SfcParser::parse(content)?;
+            
+            // 合并 script 和 script_setup 内容
+            let mut script_content = sfc.script.content.clone();
+            if let Some(setup) = &sfc.script_setup {
+                if !setup.content.is_empty() {
+                    script_content = format!("{}\n{}", script_content, setup.content);
+                }
+            }
+            
+            let data_fields = ScriptAnalyzer::extract_data_fields(&script_content);
+            let computed_fields = ScriptAnalyzer::extract_computed(&script_content);
+            let props = ScriptAnalyzer::extract_props(&script_content);
+            let imports = ScriptAnalyzer::extract_imports(&script_content);
+            let events = ScriptAnalyzer::extract_events(&script_content);
 
-        let template_bindings = TemplateAnalyzer::extract_bindings(&sfc.template.content);
+            let mut executables: Vec<ExecutableIr> = Vec::new();
+            executables.extend(ScriptAnalyzer::extract_methods(&script_content));
+            executables.extend(ScriptAnalyzer::extract_lifecycle_hooks(&script_content));
+            executables.extend(ScriptAnalyzer::extract_computed_executables(&script_content));
 
-        Ok(SourceFileIr {
-            file_path,
-            framework: "vue".to_string(),
-            component_name,
-            executables,
-            data_fields,
-            computed_fields,
-            props,
-            template_bindings,
-            imports,
-            events,
-        })
+            let template_bindings = TemplateAnalyzer::extract_bindings(&sfc.template.content);
+
+            Ok(SourceFileIr {
+                file_path,
+                framework: "vue".to_string(),
+                component_name,
+                executables,
+                data_fields,
+                computed_fields,
+                props,
+                template_bindings,
+                imports,
+                events,
+            })
+        } else {
+            // JS/TS file
+            let data_fields = ScriptAnalyzer::extract_data_fields(content);
+            let computed_fields = ScriptAnalyzer::extract_computed(content);
+            let imports = ScriptAnalyzer::extract_imports(content);
+            let events = ScriptAnalyzer::extract_events(content);
+
+            let mut executables: Vec<ExecutableIr> = Vec::new();
+            executables.extend(ScriptAnalyzer::extract_methods(content));
+            executables.extend(ScriptAnalyzer::extract_lifecycle_hooks(content));
+
+            Ok(SourceFileIr {
+                file_path,
+                framework: "js-ts".to_string(),
+                component_name,
+                executables,
+                data_fields,
+                computed_fields,
+                props: Vec::new(),
+                template_bindings: Vec::new(),
+                imports,
+                events,
+            })
+        }
     }
 
     fn analyze(

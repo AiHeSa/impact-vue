@@ -202,12 +202,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "impact-js-ts"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "impact-core",
+ "regex",
+ "serde",
+]
+
+[[package]]
 name = "impact-vue"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "impact-core",
  "impact-framework",
+ "impact-js-ts",
  "regex",
  "serde",
  "tracing",
