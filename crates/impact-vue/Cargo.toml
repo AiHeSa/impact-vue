@@ -1,0 +1,13 @@
+[package]
+name = "impact-vue"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+impact-core.workspace = true
+impact-framework.workspace = true
+regex.workspace = true
+serde.workspace = true
+tracing.workspace = true

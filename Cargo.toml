@@ -1,0 +1,30 @@
+[workspace]
+members = [
+    "crates/impact-cli",
+    "crates/impact-core",
+    "crates/impact-framework",
+    "crates/impact-vue",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+walkdir = "2"
+globset = "0.4"
+indexmap = { version = "2", features = ["serde"] }
+
+impact-core = { path = "crates/impact-core" }
+impact-framework = { path = "crates/impact-framework" }
+impact-vue = { path = "crates/impact-vue" }
