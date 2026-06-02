@@ -18,17 +18,22 @@ use crate::model::{
 use indexmap::IndexSet;
 use std::collections::HashMap;
 
+/// 查找源文件中的导出 ref 字段
+fn find_exported_ref_fields(all_irs: &[SourceFileIr]) -> HashMap<String, Vec<String>> {
+    let mut result: HashMap<String, Vec<String>> = HashMap::new();
+    
+    for ir in all_irs {
+        let file = &ir.file_path;
+        let fields: Vec<String> = ir.data_fields.iter().map(|f| f.name.clone()).collect();
+        if !fields.is_empty() {
+            result.insert(file.clone(), fields);
+        }
+    }
+    
+    result
+}
+
 /// 构建完整的 ImpactGraph
-/// 
-/// # 参数
-/// 
-/// - `all_irs`: 所有源文件的中间表示
-/// - `target`: 分析目标
-/// - `direction`: 分析方向（上游/下游/双向）
-/// 
-/// # 返回
-/// 
-/// 返回裁剪后的影响图，只包含与目标相关的节点和边。
 pub fn build_full_graph(all_irs: &[SourceFileIr], target: &Target, direction: &Direction) -> ImpactGraph {
     let mut graph = ImpactGraph {
         target: target.clone(),
@@ -37,6 +42,9 @@ pub fn build_full_graph(all_irs: &[SourceFileIr], target: &Target, direction: &D
         evidences: Vec::new(),
         unknowns: Vec::new(),
     };
+    
+    // 构建文件路径 → 导出 ref 字段的映射
+    let exported_refs = find_exported_ref_fields(all_irs);
     
     // 1. 创建所有节点
     let mut node_map: HashMap<String, Node> = HashMap::new();
@@ -56,6 +64,37 @@ pub fn build_full_graph(all_irs: &[SourceFileIr], target: &Target, direction: &D
                 line: Some(field.line),
             };
             node_map.insert(node_id, node);
+        }
+        
+        // 识别 import 的 ref 变量
+        for import in &ir.imports {
+            // 查找 import 源文件
+            for (source_file, ref_fields) in &exported_refs {
+                // 检查文件名是否匹配 import 源
+                let import_source = &import.source;
+                let source_stem = std::path::Path::new(source_file)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                
+                // 简单匹配：import source 包含源文件名
+                if import_source.contains(&source_stem) {
+                    if let Some(imported_name) = &import.imported_name {
+                        if ref_fields.contains(imported_name) {
+                            // 这是一个 import 的 ref 变量
+                            let node_id = format!("{}:data:{}", component, imported_name);
+                            node_map.entry(node_id.clone()).or_insert_with(|| Node {
+                                id: node_id,
+                                component: component.clone(),
+                                name: imported_name.clone(),
+                                node_type: NodeType::DataField,
+                                file: Some(ir.file_path.clone()),
+                                line: Some(import.line),
+                            });
+                        }
+                    }
+                }
+            }
         }
         
         // 可执行文件节点
@@ -185,6 +224,33 @@ pub fn build_full_graph(all_irs: &[SourceFileIr], target: &Target, direction: &D
                         confidence: crate::model::confidence::Confidence::High,
                         evidence_id: None,
                     });
+                    
+                    // 递归追踪被调用函数的 data_access
+                    if let Some(called_exec) = ir.executables.iter().find(|e| e.name == call) {
+                        let (sub_reads, sub_writes) = extract_data_access(&called_exec.body);
+                        for read in sub_reads {
+                            if let Some(tid) = find_data_or_prop_node(&node_map, &component, &read) {
+                                graph.edges.push(Edge {
+                                    source: exec_id.clone(),
+                                    target: tid,
+                                    edge_type: EdgeType::Reads,
+                                    confidence: crate::model::confidence::Confidence::Medium,
+                                    evidence_id: None,
+                                });
+                            }
+                        }
+                        for write in sub_writes {
+                            if let Some(tid) = find_data_or_prop_node(&node_map, &component, &write) {
+                                graph.edges.push(Edge {
+                                    source: exec_id.clone(),
+                                    target: tid,
+                                    edge_type: EdgeType::Writes,
+                                    confidence: crate::model::confidence::Confidence::Medium,
+                                    evidence_id: None,
+                                });
+                            }
+                        }
+                    }
                 } else {
                     // 在所有组件中查找（跨文件调用）
                     for (node_id, node) in &node_map {
@@ -196,6 +262,39 @@ pub fn build_full_graph(all_irs: &[SourceFileIr], target: &Target, direction: &D
                                 confidence: crate::model::confidence::Confidence::Medium,
                                 evidence_id: None,
                             });
+                            
+                            // 跨文件：查找源文件 IR，递归追踪 data_access
+                            for other_ir in all_irs {
+                                let other_component = other_ir.component_name.clone().unwrap_or_default();
+                                if other_component == node.component {
+                                    if let Some(called_exec) = other_ir.executables.iter().find(|e| e.name == call) {
+                                        let (sub_reads, sub_writes) = extract_data_access(&called_exec.body);
+                                        for read in sub_reads {
+                                            if let Some(tid) = find_data_or_prop_node(&node_map, &other_component, &read) {
+                                                graph.edges.push(Edge {
+                                                    source: exec_id.clone(),
+                                                    target: tid,
+                                                    edge_type: EdgeType::Reads,
+                                                    confidence: crate::model::confidence::Confidence::Low,
+                                                    evidence_id: None,
+                                                });
+                                            }
+                                        }
+                                        for write in sub_writes {
+                                            if let Some(tid) = find_data_or_prop_node(&node_map, &other_component, &write) {
+                                                graph.edges.push(Edge {
+                                                    source: exec_id.clone(),
+                                                    target: tid,
+                                                    edge_type: EdgeType::Writes,
+                                                    confidence: crate::model::confidence::Confidence::Low,
+                                                    evidence_id: None,
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
                             break;
                         }
                     }
