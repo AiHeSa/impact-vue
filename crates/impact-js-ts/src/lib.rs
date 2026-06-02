@@ -9,4 +9,4 @@
 
 pub mod script_analyzer;
 
-pub use script_analyzer::{JsTsAnalyzer, extract_balanced_brace};
+pub use script_analyzer::{JsTsAnalyzer, extract_balanced_brace, extract_balanced_brace_from_after_open};

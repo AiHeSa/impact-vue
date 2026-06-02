@@ -1,5 +1,6 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use impact_core::analyzer::import_resolver;
 use impact_core::model::{
     ExecutableIr, FrameworkAnalysisResult, SourceFileIr, Target,
 };
@@ -14,6 +15,39 @@ pub struct VueAdapter;
 impl VueAdapter {
     pub fn new() -> Self {
         Self
+    }
+
+    fn parse_recursive(
+        &self,
+        file: &Path,
+        content: &str,
+        depth: usize,
+        visited: &mut std::collections::HashSet<PathBuf>,
+        all_irs: &mut Vec<SourceFileIr>,
+    ) -> anyhow::Result<()> {
+        if depth == 0 || !visited.insert(file.to_path_buf()) {
+            return Ok(());
+        }
+
+        let ir = self.parse_file(file, content)?;
+
+        // 收集 import 源，解析依赖文件
+        let import_sources: Vec<String> = ir.imports.iter()
+            .map(|i| i.source.clone())
+            .collect();
+
+        all_irs.push(ir);
+
+        // 递归解析依赖
+        for source in import_sources {
+            if let Some(resolved) = import_resolver::resolve_import(file, &source) {
+                if let Ok(dep_content) = std::fs::read_to_string(&resolved) {
+                    self.parse_recursive(&resolved, &dep_content, depth - 1, visited, all_irs)?;
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -42,7 +76,7 @@ impl FrameworkAdapter for VueAdapter {
 
         if ext == "vue" {
             let sfc = SfcParser::parse(content)?;
-            
+
             // 合并 script 和 script_setup 内容
             let mut script_content = sfc.script.content.clone();
             if let Some(setup) = &sfc.script_setup {
@@ -50,7 +84,7 @@ impl FrameworkAdapter for VueAdapter {
                     script_content = format!("{}\n{}", script_content, setup.content);
                 }
             }
-            
+
             let data_fields = ScriptAnalyzer::extract_data_fields(&script_content);
             let computed_fields = ScriptAnalyzer::extract_computed(&script_content);
             let props = ScriptAnalyzer::extract_props(&script_content);
@@ -111,5 +145,19 @@ impl FrameworkAdapter for VueAdapter {
             files: _files,
             errors: Vec::new(),
         })
+    }
+
+    fn parse_file_with_deps(
+        &self,
+        file: &Path,
+        content: &str,
+        max_depth: usize,
+    ) -> anyhow::Result<Vec<SourceFileIr>> {
+        let mut all_irs = Vec::new();
+        let mut visited = std::collections::HashSet::new();
+
+        self.parse_recursive(file, content, max_depth, &mut visited, &mut all_irs)?;
+
+        Ok(all_irs)
     }
 }

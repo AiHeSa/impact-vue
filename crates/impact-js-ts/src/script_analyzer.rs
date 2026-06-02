@@ -211,6 +211,24 @@ impl JsTsAnalyzer {
             }
         }
 
+        // Composition API: xxx.value++ / xxx.value-- / xxx.value = ...
+        let re_ref_write = Regex::new(r#"(\w+)\.value\s*(?:=|\+\+|--)"#).unwrap();
+        for cap in re_ref_write.captures_iter(body) {
+            let field = cap[1].to_string();
+            if !is_excluded_field(&field) {
+                writes.push(field);
+            }
+        }
+
+        // Composition API: xxx.value（读取）
+        let re_ref_read = Regex::new(r#"(\w+)\.value\b"#).unwrap();
+        for cap in re_ref_read.captures_iter(body) {
+            let field = cap[1].to_string();
+            if !is_excluded_field(&field) {
+                reads.push(field);
+            }
+        }
+
         (reads, writes)
     }
 
@@ -267,8 +285,32 @@ impl JsTsAnalyzer {
     }
 }
 
-/// 提取平衡括号内容
+/// 提取平衡括号内容（从第一个 `{` 开始）
+/// 用于提取函数体等场景，输入可能在 `{` 之前有其他内容
 pub fn extract_balanced_brace(s: &str) -> String {
+    // 先找到第一个 `{`
+    let start = match s.find('{') {
+        Some(pos) => pos + 1,
+        None => return String::new(),
+    };
+    
+    let mut depth = 1;
+    for (i, ch) in s[start..].char_indices() {
+        if ch == '{' {
+            depth += 1;
+        } else if ch == '}' {
+            depth -= 1;
+            if depth == 0 {
+                return s[start..start + i].to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+/// 提取平衡括号内容（假设输入紧接在 `{` 之后）
+/// 用于 Vue Options API 解析，输入已经跳过了开头的 `{`
+pub fn extract_balanced_brace_from_after_open(s: &str) -> String {
     let mut depth = 1;
     for (i, ch) in s.char_indices() {
         if ch == '{' {

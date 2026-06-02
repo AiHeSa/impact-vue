@@ -1,5 +1,6 @@
 pub mod cross_module;
 pub mod graph_builder;
+pub mod import_resolver;
 pub mod init_phase;
 pub mod path_utils;
 pub mod pruning;

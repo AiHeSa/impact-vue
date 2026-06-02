@@ -7,7 +7,7 @@
 use impact_core::model::{
     ComputedIr, DataFieldIr, EventIr, ExecutableIr, ExecutableKind, ImportIr, PropIr,
 };
-use impact_js_ts::{JsTsAnalyzer, extract_balanced_brace};
+use impact_js_ts::{JsTsAnalyzer, extract_balanced_brace, extract_balanced_brace_from_after_open};
 use regex::Regex;
 
 /// Vue 脚本分析器
@@ -26,7 +26,7 @@ impl ScriptAnalyzer {
         let re_data = Regex::new(r"data\s*\(\s*\)\s*\{").unwrap();
         if let Some(data_match) = re_data.find(script) {
             let rest = &script[data_match.end()..];
-            let body = extract_balanced_brace(rest);
+            let body = extract_balanced_brace_from_after_open(rest);
             let re_field = Regex::new(r#"(\w+)\s*:"#).unwrap();
             for cap in re_field.captures_iter(&body) {
                 fields.push(DataFieldIr {
@@ -55,12 +55,12 @@ impl ScriptAnalyzer {
         let re_computed_block = Regex::new(r"computed\s*:\s*\{").unwrap();
         if let Some(m) = re_computed_block.find(script) {
             let rest = &script[m.end()..];
-            let body = extract_balanced_brace(rest);
+            let body = extract_balanced_brace_from_after_open(rest);
             let re_method = Regex::new(r#"(\w+)\s*\(\s*\)\s*\{"#).unwrap();
             for cap in re_method.captures_iter(&body) {
                 let name = cap[1].to_string();
                 let method_start = cap.get(0).unwrap().end();
-                let method_body = extract_balanced_brace(&body[method_start..]);
+                let method_body = extract_balanced_brace_from_after_open(&body[method_start..]);
                 let deps = JsTsAnalyzer::extract_this_refs(&method_body);
                 computed.push(ComputedIr {
                     name,
@@ -125,12 +125,12 @@ impl ScriptAnalyzer {
         let re_methods_block = Regex::new(r"methods\s*:\s*\{").unwrap();
         if let Some(m) = re_methods_block.find(script) {
             let rest = &script[m.end()..];
-            let body = extract_balanced_brace(rest);
+            let body = extract_balanced_brace_from_after_open(rest);
             let re_method = Regex::new(r#"(\w+)\s*\(\s*[^)]*\)\s*\{"#).unwrap();
             for cap in re_method.captures_iter(&body) {
                 let name = cap[1].to_string();
                 let method_start = cap.get(0).unwrap().end();
-                let method_body = extract_balanced_brace(&body[method_start..]);
+                let method_body = extract_balanced_brace_from_after_open(&body[method_start..]);
                 methods.push(ExecutableIr {
                     kind: ExecutableKind::Method,
                     name,
@@ -165,7 +165,7 @@ impl ScriptAnalyzer {
             if let Ok(re) = Regex::new(&pattern) {
                 if let Some(m) = re.find(script) {
                     let rest = &script[m.end()..];
-                    let body = extract_balanced_brace(rest);
+                    let body = extract_balanced_brace_from_after_open(rest);
                     executables.push(ExecutableIr {
                         kind: ExecutableKind::Lifecycle,
                         name: hook.to_string(),

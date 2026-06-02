@@ -13,6 +13,18 @@ pub trait FrameworkAdapter: Send + Sync {
         content: &str,
     ) -> anyhow::Result<SourceFileIr>;
 
+    /// 解析文件及其所有依赖
+    /// 默认实现只解析单个文件
+    fn parse_file_with_deps(
+        &self,
+        file: &Path,
+        content: &str,
+        _max_depth: usize,
+    ) -> anyhow::Result<Vec<SourceFileIr>> {
+        let ir = self.parse_file(file, content)?;
+        Ok(vec![ir])
+    }
+
     fn analyze(
         &self,
         files: Vec<SourceFileIr>,

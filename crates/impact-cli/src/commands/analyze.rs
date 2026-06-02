@@ -64,9 +64,10 @@ pub fn run(args: &AnalyzeArgs, registry: &AdapterRegistry) -> anyhow::Result<()>
         _ => Direction::Both,
     };
 
-    let ir = adapter.parse_file(entry_path, &content)?;
-
-    let mut result = adapter.analyze(vec![ir], &target)?;
+    // 使用 parse_file_with_deps 解析文件及其依赖
+    let all_irs = adapter.parse_file_with_deps(entry_path, &content, 10)?;
+    
+    let mut result = adapter.analyze(all_irs, &target)?;
 
     if args.cross_module {
         if let Some(root) = &args.project_root {

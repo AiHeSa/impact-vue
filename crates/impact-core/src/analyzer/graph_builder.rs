@@ -337,6 +337,12 @@ pub fn build_full_graph(all_irs: &[SourceFileIr], target: &Target, direction: &D
     let mut visited_edges: IndexSet<String> = IndexSet::new();
     let mut queue: Vec<String> = target_nodes.iter().cloned().collect();
     let mut related_edges = Vec::new();
+    let mut related_node_ids: IndexSet<String> = IndexSet::new();
+    
+    // 目标节点本身必须包含在结果中
+    for id in &target_nodes {
+        related_node_ids.insert(id.clone());
+    }
     
     while let Some(node_id) = queue.pop() {
         if visited_nodes.contains(&node_id) {
@@ -349,6 +355,8 @@ pub fn build_full_graph(all_irs: &[SourceFileIr], target: &Target, direction: &D
             if (edge.source == node_id || edge.target == node_id) && !visited_edges.contains(&edge_key) {
                 visited_edges.insert(edge_key);
                 related_edges.push(edge.clone());
+                related_node_ids.insert(edge.source.clone());
+                related_node_ids.insert(edge.target.clone());
                 if !visited_nodes.contains(&edge.source) {
                     queue.push(edge.source.clone());
                 }
@@ -360,14 +368,8 @@ pub fn build_full_graph(all_irs: &[SourceFileIr], target: &Target, direction: &D
     }
     
     // 收集相关的节点
-    let mut related_nodes = IndexSet::new();
-    for edge in &related_edges {
-        related_nodes.insert(edge.source.clone());
-        related_nodes.insert(edge.target.clone());
-    }
-    
     let mut filtered_nodes = Vec::new();
-    for node_id in &related_nodes {
+    for node_id in &related_node_ids {
         if let Some(node) = node_map.get(node_id) {
             filtered_nodes.push(node.clone());
         }
@@ -489,6 +491,20 @@ fn extract_data_access(body: &str) -> (Vec<String>, Vec<String>) {
         if !["data", "methods", "computed", "props", "emit", "$emit", "$refs", "$el", "$options", "$parent", "$root", "$children", "$slots", "$scopedSlots", "$attrs", "$listeners", "$watch", "$set", "$delete", "$nextTick", "$on", "$once", "$off", "$mount", "$forceUpdate", "$destroy"].contains(&field.as_str()) {
             writes.push(field);
         }
+    }
+    
+    // Composition API: xxx.value++ / xxx.value-- / xxx.value = ...
+    let re_ref_write = regex::Regex::new(r#"(\w+)\.value\s*(?:=|\+\+|--)"#).unwrap();
+    for cap in re_ref_write.captures_iter(body) {
+        let field = cap[1].to_string();
+        writes.push(field);
+    }
+    
+    // Composition API: xxx.value（读取）
+    let re_ref_read = regex::Regex::new(r#"(\w+)\.value\b"#).unwrap();
+    for cap in re_ref_read.captures_iter(body) {
+        let field = cap[1].to_string();
+        reads.push(field);
     }
     
     (reads, writes)
