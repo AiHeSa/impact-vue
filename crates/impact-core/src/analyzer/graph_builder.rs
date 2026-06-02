@@ -175,6 +175,7 @@ pub fn build_full_graph(all_irs: &[SourceFileIr], target: &Target, direction: &D
             // 分析方法调用
             let calls = extract_method_calls(&exec.body);
             for call in calls {
+                // 先在当前组件中查找
                 let call_id = format!("{}:method:{}", component, call);
                 if node_map.contains_key(&call_id) {
                     graph.edges.push(Edge {
@@ -184,6 +185,20 @@ pub fn build_full_graph(all_irs: &[SourceFileIr], target: &Target, direction: &D
                         confidence: crate::model::confidence::Confidence::High,
                         evidence_id: None,
                     });
+                } else {
+                    // 在所有组件中查找（跨文件调用）
+                    for (node_id, node) in &node_map {
+                        if node.node_type == NodeType::Method && node.name == call {
+                            graph.edges.push(Edge {
+                                source: exec_id.clone(),
+                                target: node_id.clone(),
+                                edge_type: EdgeType::Calls,
+                                confidence: crate::model::confidence::Confidence::Medium,
+                                evidence_id: None,
+                            });
+                            break;
+                        }
+                    }
                 }
             }
             
@@ -513,12 +528,44 @@ fn extract_data_access(body: &str) -> (Vec<String>, Vec<String>) {
 /// 从执行体中提取方法调用
 fn extract_method_calls(body: &str) -> Vec<String> {
     let mut calls = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     
-    // 匹配 this.method() 调用
-    let re = regex::Regex::new(r#"this\.(\w+)\(\s*\)"#).unwrap();
+    // 匹配 this.method() 调用（Options API）
+    let re_this = regex::Regex::new(r#"this\.(\w+)\(\s*\)"#).unwrap();
+    for cap in re_this.captures_iter(body) {
+        let name = cap[1].to_string();
+        if seen.insert(name.clone()) {
+            calls.push(name);
+        }
+    }
     
-    for cap in re.captures_iter(body) {
-        calls.push(cap[1].to_string());
+    // 匹配直接函数调用 method()（Composition API）
+    // 排除常见全局函数
+    let excluded = [
+        "console", "log", "error", "warn", "info", "debug",
+        "setTimeout", "setInterval", "clearTimeout", "clearInterval",
+        "parseInt", "parseFloat", "isNaN", "isFinite",
+        "require", "import", "export",
+        "if", "else", "for", "while", "switch", "case", "return",
+        "new", "typeof", "instanceof", "void", "delete",
+        "ref", "reactive", "computed", "watch", "watchEffect",
+        "onMounted", "onUnmounted", "onUpdated", "onBeforeMount", "onBeforeUnmount",
+        "defineProps", "defineEmits", "defineExpose",
+        "nextTick", "toRef", "toRefs", "unref", "isRef",
+        "push", "pop", "shift", "unshift", "splice", "slice",
+        "map", "filter", "reduce", "forEach", "find", "findIndex",
+        "then", "catch", "finally", "resolve", "reject",
+        "addEventListener", "removeEventListener",
+        "querySelector", "querySelectorAll", "getElementById",
+        "toString", "valueOf", "hasOwnProperty",
+    ];
+    
+    let re_direct = regex::Regex::new(r#"\b(\w+)\(\s*\)"#).unwrap();
+    for cap in re_direct.captures_iter(body) {
+        let name = cap[1].to_string();
+        if !excluded.contains(&name.as_str()) && !name.starts_with('$') && seen.insert(name.clone()) {
+            calls.push(name);
+        }
     }
     
     calls
