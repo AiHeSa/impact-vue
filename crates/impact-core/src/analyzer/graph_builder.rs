@@ -530,8 +530,8 @@ fn extract_method_calls(body: &str) -> Vec<String> {
     let mut calls = Vec::new();
     let mut seen = std::collections::HashSet::new();
     
-    // 匹配 this.method() 调用（Options API）
-    let re_this = regex::Regex::new(r#"this\.(\w+)\(\s*\)"#).unwrap();
+    // 匹配 this.method(...) 调用（Options API）
+    let re_this = regex::Regex::new(r#"this\.(\w+)\s*\("#).unwrap();
     for cap in re_this.captures_iter(body) {
         let name = cap[1].to_string();
         if seen.insert(name.clone()) {
@@ -539,7 +539,7 @@ fn extract_method_calls(body: &str) -> Vec<String> {
         }
     }
     
-    // 匹配直接函数调用 method()（Composition API）
+    // 匹配直接函数调用 method(...)（Composition API）
     // 排除常见全局函数
     let excluded = [
         "console", "log", "error", "warn", "info", "debug",
@@ -560,7 +560,7 @@ fn extract_method_calls(body: &str) -> Vec<String> {
         "toString", "valueOf", "hasOwnProperty",
     ];
     
-    let re_direct = regex::Regex::new(r#"\b(\w+)\(\s*\)"#).unwrap();
+    let re_direct = regex::Regex::new(r#"\b(\w+)\s*\("#).unwrap();
     for cap in re_direct.captures_iter(body) {
         let name = cap[1].to_string();
         if !excluded.contains(&name.as_str()) && !name.starts_with('$') && seen.insert(name.clone()) {
