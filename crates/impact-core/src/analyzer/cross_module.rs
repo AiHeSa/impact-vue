@@ -59,7 +59,7 @@ impl CrossModuleAnalysis {
     ) -> anyhow::Result<HashMap<String, Vec<String>>> {
         let mut graph: HashMap<String, Vec<String>> = HashMap::new();
 
-        let re_import = Regex::new(r#"(?:import|require)\s*\(?['"]([^'"]+)['"]"#)?;
+        let re_import = Regex::new(r#"(?:from\s+['"]([^'"]+)['"]|(?:import|require)\s*\(?['"]([^'"]+)['"])"#)?;
 
         for file in files {
             let content = std::fs::read_to_string(file)?;
@@ -72,7 +72,7 @@ impl CrossModuleAnalysis {
             let mut imports = Vec::new();
 
             for cap in re_import.captures_iter(&content) {
-                let raw = cap[1].to_string();
+                let raw = cap.get(1).or_else(|| cap.get(2)).map(|m| m.as_str().to_string()).unwrap_or_default();
                 if raw.starts_with('.') {
                     if let Some(resolved) =
                         resolve_relative_file(file, &raw, &["vue", "ts", "js", "tsx", "jsx"])
