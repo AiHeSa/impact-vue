@@ -2,7 +2,7 @@
 //!
 //! 从完整影响图中提取从起点到终点的所有路径。
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 use crate::model::{Edge, ImpactGraph, Node};
 
@@ -17,13 +17,13 @@ pub struct PathQueryResult {
     pub edges: Vec<Edge>,
 }
 
-/// 在图中搜索从 start 到 end 的所有简单路径
+/// 在图中搜索从 start 到 end 的所有简单路径（无环）
 pub fn find_paths(graph: &ImpactGraph, start: &str, end: &str) -> PathQueryResult {
     // 构建邻接表
     let adj = build_adjacency_list(&graph.edges);
     
-    // BFS 找所有路径
-    let paths = bfs_all_paths(&adj, start, end);
+    // DFS 找所有路径
+    let paths = dfs_all_paths(&adj, start, end);
     
     // 收集路径上的节点和边
     let path_node_ids: HashSet<String> = paths.iter()
@@ -65,48 +65,46 @@ fn build_adjacency_list(edges: &[Edge]) -> HashMap<String, Vec<String>> {
     adj
 }
 
-/// BFS 找从 start 到 end 的所有最短路径
-fn bfs_all_paths(
+/// DFS 找从 start 到 end 的所有简单路径（无环）
+fn dfs_all_paths(
     adj: &HashMap<String, Vec<String>>,
     start: &str,
     end: &str,
 ) -> Vec<Vec<String>> {
     let mut result = Vec::new();
-    let mut queue: VecDeque<Vec<String>> = VecDeque::new();
-    let mut min_len = usize::MAX;
+    let mut current_path = vec![start.to_string()];
+    let mut visited = HashSet::new();
+    visited.insert(start.to_string());
     
-    queue.push_back(vec![start.to_string()]);
+    dfs_recursive(adj, start, end, &mut current_path, &mut visited, &mut result);
     
-    while let Some(path) = queue.pop_front() {
-        let current = path.last().unwrap();
-        
-        // 超过最短路径长度，停止
-        if path.len() > min_len {
-            continue;
-        }
-        
-        if current == end {
-            if path.len() < min_len {
-                min_len = path.len();
-                result.clear();
-            }
-            result.push(path);
-            continue;
-        }
-        
-        if let Some(neighbors) = adj.get(current) {
-            for neighbor in neighbors {
-                // 避免环
-                if !path.contains(neighbor) {
-                    let mut new_path = path.clone();
-                    new_path.push(neighbor.clone());
-                    queue.push_back(new_path);
-                }
+    result
+}
+
+fn dfs_recursive(
+    adj: &HashMap<String, Vec<String>>,
+    current: &str,
+    end: &str,
+    path: &mut Vec<String>,
+    visited: &mut HashSet<String>,
+    result: &mut Vec<Vec<String>>,
+) {
+    if current == end {
+        result.push(path.clone());
+        return;
+    }
+    
+    if let Some(neighbors) = adj.get(current) {
+        for neighbor in neighbors {
+            if !visited.contains(neighbor) {
+                visited.insert(neighbor.clone());
+                path.push(neighbor.clone());
+                dfs_recursive(adj, neighbor, end, path, visited, result);
+                path.pop();
+                visited.remove(neighbor);
             }
         }
     }
-    
-    result
 }
 
 /// 将路径查询结果转换为精简的 ImpactGraph
