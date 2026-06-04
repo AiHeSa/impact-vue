@@ -42,6 +42,12 @@ pub struct AnalyzeArgs {
 
     #[arg(long, help = "Path aliases, e.g. @/=src/,~=/src/ (format: alias=path)")]
     pub alias: Vec<String>,
+
+    #[arg(long, help = "Path query: start node, e.g. method:handleClick")]
+    pub from: Option<String>,
+
+    #[arg(long, help = "Path query: end node, e.g. data:count")]
+    pub to: Option<String>,
 }
 
 use impact_core::model::Direction;
@@ -104,6 +110,47 @@ pub fn run(args: &AnalyzeArgs, registry: &AdapterRegistry) -> anyhow::Result<()>
 
     let graph = analyzer::build_graph(&result.files, &target, &direction);
 
+    // 路径查询模式
+    if let (Some(from_str), Some(to_str)) = (&args.from, &args.to) {
+        let from_target = analyzer::resolve_watch(from_str)
+            .ok_or_else(|| anyhow::anyhow!("Invalid --from expression: {}", from_str))?;
+        let to_target = analyzer::resolve_watch(to_str)
+            .ok_or_else(|| anyhow::anyhow!("Invalid --to expression: {}", to_str))?;
+        
+        // 找到 from 和 to 的节点 ID
+        let from_id = find_node_id(&graph, &from_target);
+        let to_id = find_node_id(&graph, &to_target);
+        
+        match (from_id, to_id) {
+            (Some(from), Some(to)) => {
+                let path_result = impact_core::analyzer::path_finder::find_paths(&graph, &from, &to);
+                let report = impact_core::analyzer::path_finder::path_report(&path_result, from_str, to_str);
+                
+                let output_mode = args.output_mode.as_str();
+                match output_mode {
+                    "cli" | "both" => {
+                        println!("{}", report);
+                    }
+                    _ => {}
+                }
+                
+                if output_mode == "report" || output_mode == "both" {
+                    let output_path = PathBuf::from(&args.output);
+                    let dir = auto_report_dir(&output_path, &target)?;
+                    std::fs::create_dir_all(&dir)?;
+                    std::fs::write(dir.join("path-report.md"), &report)?;
+                    let path_graph = impact_core::analyzer::path_finder::paths_to_graph(&path_result, &target);
+                    reporter::write_outputs(&path_graph, &dir)?;
+                }
+                
+                return Ok(());
+            }
+            _ => {
+                eprintln!("Warning: Could not find nodes for --from or --to, falling back to normal analysis");
+            }
+        }
+    }
+
     let output_mode = args.output_mode.as_str();
     match output_mode {
         "cli" | "both" => {
@@ -121,6 +168,34 @@ pub fn run(args: &AnalyzeArgs, registry: &AdapterRegistry) -> anyhow::Result<()>
     }
 
     Ok(())
+}
+
+/// 根据 target 查找图中的节点 ID
+fn find_node_id(graph: &impact_core::model::ImpactGraph, target: &Target) -> Option<String> {
+    use impact_core::model::{NodeType, TargetKind};
+    
+    for node in &graph.nodes {
+        let matches = match (&target.kind, &node.node_type) {
+            (TargetKind::Data, NodeType::DataField) => true,
+            (TargetKind::Method, NodeType::Method) => true,
+            (TargetKind::Computed, NodeType::Computed) => true,
+            (TargetKind::Prop, NodeType::Prop) => true,
+            (TargetKind::Init, NodeType::InitPhase) => true,
+            _ => false,
+        };
+        
+        if matches {
+            if let Some(name) = &target.name {
+                if node.name == *name {
+                    return Some(node.id.clone());
+                }
+            } else {
+                return Some(node.id.clone());
+            }
+        }
+    }
+    
+    None
 }
 
 fn auto_report_dir(base: &Path, target: &Target) -> anyhow::Result<PathBuf> {
