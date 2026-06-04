@@ -15,12 +15,17 @@ pub struct PathQueryResult {
     pub nodes: Vec<Node>,
     /// 路径上的边
     pub edges: Vec<Edge>,
+    /// 检测到的环
+    pub cycles: Vec<Vec<String>>,
 }
 
 /// 在图中搜索从 start 到 end 的所有简单路径（无环）
 pub fn find_paths(graph: &ImpactGraph, start: &str, end: &str) -> PathQueryResult {
     // 构建邻接表
     let adj = build_adjacency_list(&graph.edges);
+    
+    // 检测环
+    let cycles = detect_cycles(&adj, start);
     
     // DFS 找所有路径
     let paths = dfs_all_paths(&adj, start, end);
@@ -49,7 +54,7 @@ pub fn find_paths(graph: &ImpactGraph, start: &str, end: &str) -> PathQueryResul
         .cloned()
         .collect();
     
-    PathQueryResult { paths, nodes, edges }
+    PathQueryResult { paths, nodes, edges, cycles }
 }
 
 /// 构建邻接表
@@ -63,6 +68,53 @@ fn build_adjacency_list(edges: &[Edge]) -> HashMap<String, Vec<String>> {
     }
     
     adj
+}
+
+/// 从起点开始检测环
+fn detect_cycles(adj: &HashMap<String, Vec<String>>, start: &str) -> Vec<Vec<String>> {
+    let mut cycles = Vec::new();
+    let mut visited = HashSet::new();
+    let mut in_stack = HashSet::new();
+    let mut path = Vec::new();
+    
+    dfs_detect_cycles(adj, start, &mut visited, &mut in_stack, &mut path, &mut cycles);
+    
+    cycles
+}
+
+fn dfs_detect_cycles(
+    adj: &HashMap<String, Vec<String>>,
+    current: &str,
+    visited: &mut HashSet<String>,
+    in_stack: &mut HashSet<String>,
+    path: &mut Vec<String>,
+    cycles: &mut Vec<Vec<String>>,
+) {
+    if in_stack.contains(current) {
+        // 找到环，提取环的节点
+        if let Some(pos) = path.iter().position(|n| n == current) {
+            let cycle = path[pos..].to_vec();
+            cycles.push(cycle);
+        }
+        return;
+    }
+    
+    if visited.contains(current) {
+        return;
+    }
+    
+    visited.insert(current.to_string());
+    in_stack.insert(current.to_string());
+    path.push(current.to_string());
+    
+    if let Some(neighbors) = adj.get(current) {
+        for neighbor in neighbors {
+            dfs_detect_cycles(adj, neighbor, visited, in_stack, path, cycles);
+        }
+    }
+    
+    path.pop();
+    in_stack.remove(current);
 }
 
 /// DFS 找从 start 到 end 的所有简单路径（无环）
@@ -126,6 +178,27 @@ pub fn path_report(result: &PathQueryResult, from: &str, to: &str) -> String {
     report.push_str(&format!("**起点**: `{}`\n", from));
     report.push_str(&format!("**终点**: `{}`\n", to));
     report.push_str(&format!("**找到路径数**: {}\n\n", result.paths.len()));
+    
+    if !result.cycles.is_empty() {
+        report.push_str(&format!("**检测到环数**: {}\n\n", result.cycles.len()));
+        report.push_str("## 检测到的环\n\n");
+        for (i, cycle) in result.cycles.iter().enumerate() {
+            report.push_str(&format!("### 环 {}\n\n", i + 1));
+            report.push_str("```");
+            report.push('\n');
+            for (j, node) in cycle.iter().enumerate() {
+                if j > 0 {
+                    report.push_str("    ↓\n");
+                }
+                report.push_str(&format!("{}\n", node));
+            }
+            // 闭环
+            if let Some(first) = cycle.first() {
+                report.push_str(&format!("    ↓ (回到 {})\n", first));
+            }
+            report.push_str("```\n\n");
+        }
+    }
     
     if result.paths.is_empty() {
         report.push_str("未找到从起点到终点的路径。\n");
