@@ -57,9 +57,43 @@ impact analyze --framework vue --entry <path> --watch <target> [options]
 
 指定起点和终点，输出从 A 到 B 的所有路径。适合精简分析范围，只关注关键链路。
 
+**注意**：必须同时指定 `--watch`，且 `--watch` 的目标应覆盖 `--from` 节点。
+
 ```bash
+# ✅ 正确
 impact analyze --framework vue --entry src/App.vue --watch method:handleClick \
   --from method:handleClick --to data:count --output-mode cli
+
+# ❌ 会失败（缺少 --watch）
+impact analyze --framework vue --entry src/App.vue \
+  --from method:handleClick --to data:count
+```
+
+路径查询报告格式：
+
+```
+# 路径查询报告
+
+起点: method:handleClick
+终点: data:count
+找到路径数: 3
+检测到环数: 1
+
+## 检测到的环
+环 1:
+  A → B → C → A
+
+## 路径
+路径 1: A → D → E
+路径 2: A → B → E
+
+## 节点详情
+- A [Method] (src/App.vue)
+- D [DataField] (src/store.ts)
+
+## 边详情
+- A --Calls/Medium--> D
+- D --Writes/High--> E
 ```
 
 ### --alias
@@ -88,6 +122,8 @@ impact analyze --framework vue --entry src/App.vue --watch data:count \
 | `report` | 仅生成本地报告 |
 | `both` | 终端 + 本地报告 |
 
+首次探索建议用 `cli`，确认结果后再用 `report` 生成正式报告。
+
 ## 支持的分析能力
 
 - **Options API**：data()、methods、computed、props、lifecycle
@@ -109,7 +145,7 @@ impact analyze --framework vue --entry src/App.vue --watch data:count \
 2. 默认使用 `--output-mode cli`，不写本地文件。
 3. 如果用户关心某个 method/data/computed 的链路，用 `--watch method:xxx` 格式。
 4. 如果分析跨组件影响，加 `--cross-module --project-root <dir>`。
-5. 如果需要精简路径，用 `--from A --to B`。
+5. 如果需要精简路径，用 `--from A --to B`（必须同时带 `--watch`）。
 6. 如果项目用 `@/` 别名，加 `--alias @/=src/`。
 7. 结论要服务于 debug：说明可能链路、关键节点、风险点。
 
@@ -167,12 +203,25 @@ impact analyze --framework vue --entry src/Component.vue --watch data:count \
 
 ```
 **Impact 结果**
-- 入口：`<entry>`
-- 目标：`<target>`
-- 关键链路：列出 2-5 条最值得关注的链路
-- Debug 关注点：列出最可能相关的节点、状态流、事件流
-- 建议验证：列出需要手动验证或跑测试的位置
+- 入口：`src/Component.vue`
+- 目标：`data:count`
+- 关键链路：
+  - `Component:method:increment --Writes--> Component:data:count`
+  - `Component:computed:double --DependsOn--> Component:data:count`
+  - `Component:template:text:1 --Renders--> Component:data:count`
+- Debug 关注点：count 被 increment/decrement 修改，影响 computed:double 和模板渲染
+- 建议验证：跑单元测试验证 increment 逻辑，检查模板渲染是否正确
 ```
+
+## 常见问题
+
+| 问题 | 原因 | 解决 |
+|------|------|------|
+| "Could not find nodes for --from or --to" | `--watch` 未指定或目标不匹配 | 加上 `--watch` 参数，确保覆盖 `--from` 节点 |
+| 跨模块分析结果为空 | `--project-root` 路径不对 | 用绝对路径或确认相对路径正确 |
+| Composition API store 无结果 | 文件未被 import | 确保 entry 文件直接或间接引用了该 store |
+| 路径查询路径数为 0 | 目标不在可达范围内 | 检查图结构，确认起点到终点是否有路 |
+| entry 文件不存在 | 路径错误 | 检查文件路径，用绝对路径 |
 
 ## 注意事项
 
@@ -181,5 +230,5 @@ impact analyze --framework vue --entry src/Component.vue --watch data:count \
 - 它是静态 may-affect 分析，需要结合代码阅读和测试验证。
 - 跨组件分析需要 `--cross-module --project-root` 才能识别父子组件链路。
 - Pinia store 分析会自动识别 `defineStore` 模式，无需特殊参数。
-- 路径查询用 `--from`/`--to`，输出精简路径报告，适合交给模型分析。
+- 路径查询用 `--from`/`--to`，必须同时带 `--watch`，输出精简路径报告，适合交给模型分析。
 - 如果 CLI 报错，先运行 `impact analyze --help` 检查参数。
