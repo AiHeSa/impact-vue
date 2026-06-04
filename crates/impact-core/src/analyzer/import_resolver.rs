@@ -2,11 +2,46 @@
 //!
 //! 解析 import 语句，找到引用的实际文件路径。
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// 解析 import 路径，返回实际文件路径
 pub fn resolve_import(current_file: &Path, import_source: &str) -> Option<PathBuf> {
+    resolve_import_with_aliases(current_file, import_source, &HashMap::new())
+}
+
+/// 解析 import 路径（支持 alias）
+pub fn resolve_import_with_aliases(
+    current_file: &Path,
+    import_source: &str,
+    aliases: &HashMap<String, String>,
+) -> Option<PathBuf> {
     let parent = current_file.parent()?;
+    
+    // 处理 alias 路径（如 @/stores/xxx）
+    let resolved_source = resolve_alias(import_source, aliases);
+    
+    // 如果是绝对路径（alias 解析后的结果）
+    if let Some(absolute) = &resolved_source {
+        let candidate = PathBuf::from(absolute);
+        if candidate.exists() && candidate.is_file() {
+            return Some(candidate);
+        }
+        // 尝试添加扩展名
+        for ext in &["ts", "js", "vue", "tsx", "jsx"] {
+            let with_ext = candidate.with_extension(ext);
+            if with_ext.exists() && with_ext.is_file() {
+                return Some(with_ext);
+            }
+        }
+        // 尝试 index 文件
+        for ext in &["ts", "js", "vue"] {
+            let index = candidate.join(format!("index.{}", ext));
+            if index.exists() && index.is_file() {
+                return Some(index);
+            }
+        }
+    }
     
     // 只处理相对路径
     if !import_source.starts_with('.') {
@@ -36,6 +71,34 @@ pub fn resolve_import(current_file: &Path, import_source: &str) -> Option<PathBu
         }
     }
     
+    None
+}
+
+/// 解析 alias 路径
+fn resolve_alias(import_source: &str, aliases: &HashMap<String, String>) -> Option<String> {
+    for (alias, target) in aliases {
+        let alias_prefix = if alias.ends_with('/') {
+            alias.clone()
+        } else {
+            format!("{}/", alias)
+        };
+        
+        if import_source == alias.trim_end_matches('/') || import_source.starts_with(&alias_prefix) {
+            let rest = if import_source.starts_with(&alias_prefix) {
+                &import_source[alias_prefix.len()..]
+            } else {
+                ""
+            };
+            
+            let resolved = if target.ends_with('/') {
+                format!("{}{}", target, rest)
+            } else {
+                format!("{}/{}", target, rest)
+            };
+            
+            return Some(resolved);
+        }
+    }
     None
 }
 

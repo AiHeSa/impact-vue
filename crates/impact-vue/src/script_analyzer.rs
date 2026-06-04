@@ -14,7 +14,7 @@ use regex::Regex;
 pub struct ScriptAnalyzer;
 
 impl ScriptAnalyzer {
-    /// 提取数据字段（Options API data() + Composition API ref/reactive）
+    /// 提取数据字段（Options API data() + Composition API ref/reactive + Pinia state）
     pub fn extract_data_fields(script: &str) -> Vec<DataFieldIr> {
         if script.is_empty() {
             return Vec::new();
@@ -34,6 +34,41 @@ impl ScriptAnalyzer {
                     default_value: None,
                     line: 0,
                 });
+            }
+        }
+
+        // Pinia: state: () => ({ ... }) 或 state() { return { ... } }
+        let re_state_arrow = Regex::new(r"state\s*:\s*\(\s*\)\s*=>\s*\(\s*\{").unwrap();
+        if let Some(m) = re_state_arrow.find(script) {
+            let rest = &script[m.end()..];
+            let body = extract_balanced_brace_from_after_open(rest);
+            let re_field = Regex::new(r#"(\w+)\s*:"#).unwrap();
+            for cap in re_field.captures_iter(&body) {
+                let name = cap[1].to_string();
+                if !fields.iter().any(|f| f.name == name) {
+                    fields.push(DataFieldIr {
+                        name,
+                        default_value: None,
+                        line: 0,
+                    });
+                }
+            }
+        }
+
+        let re_state_fn = Regex::new(r"state\s*\(\s*\)\s*\{").unwrap();
+        if let Some(m) = re_state_fn.find(script) {
+            let rest = &script[m.end()..];
+            let body = extract_balanced_brace_from_after_open(rest);
+            let re_field = Regex::new(r#"(\w+)\s*:"#).unwrap();
+            for cap in re_field.captures_iter(&body) {
+                let name = cap[1].to_string();
+                if !fields.iter().any(|f| f.name == name) {
+                    fields.push(DataFieldIr {
+                        name,
+                        default_value: None,
+                        line: 0,
+                    });
+                }
             }
         }
 
@@ -82,6 +117,25 @@ impl ScriptAnalyzer {
                 deps,
                 line: 0,
             });
+        }
+
+        // Pinia getters: getters: { ... }
+        let re_getters = Regex::new(r"getters\s*:\s*\{").unwrap();
+        if let Some(m) = re_getters.find(script) {
+            let rest = &script[m.end()..];
+            let body = extract_balanced_brace_from_after_open(rest);
+            // 匹配: name: (state) => state.xxx
+            let re_getter = Regex::new(r#"(\w+)\s*:\s*\(\s*\w+\s*\)\s*=>"#).unwrap();
+            for cap in re_getter.captures_iter(&body) {
+                let name = cap[1].to_string();
+                if !computed.iter().any(|c| c.name == name) {
+                    computed.push(ComputedIr {
+                        name,
+                        deps: Vec::new(),
+                        line: 0,
+                    });
+                }
+            }
         }
 
         computed
@@ -135,6 +189,25 @@ impl ScriptAnalyzer {
                     kind: ExecutableKind::Method,
                     name,
                     body: method_body,
+                    line: 0,
+                });
+            }
+        }
+
+        // Pinia actions: actions: { ... }
+        let re_actions = Regex::new(r"actions\s*:\s*\{").unwrap();
+        if let Some(m) = re_actions.find(script) {
+            let rest = &script[m.end()..];
+            let body = extract_balanced_brace_from_after_open(rest);
+            let re_action = Regex::new(r#"(\w+)\s*\(\s*[^)]*\)\s*\{"#).unwrap();
+            for cap in re_action.captures_iter(&body) {
+                let name = cap[1].to_string();
+                let action_start = cap.get(0).unwrap().end();
+                let action_body = extract_balanced_brace_from_after_open(&body[action_start..]);
+                methods.push(ExecutableIr {
+                    kind: ExecutableKind::Method,
+                    name,
+                    body: action_body,
                     line: 0,
                 });
             }

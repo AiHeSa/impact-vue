@@ -7,6 +7,15 @@ use impact_core::model::{
 };
 use regex::Regex;
 
+/// Pinia Store 定义
+#[derive(Debug, Clone)]
+pub struct StoreDefinition {
+    pub name: String,
+    pub state_fields: Vec<String>,
+    pub getters: Vec<String>,
+    pub actions: Vec<String>,
+}
+
 /// JS/TS 脚本分析器
 pub struct JsTsAnalyzer;
 
@@ -282,6 +291,128 @@ impl JsTsAnalyzer {
             writes.push(cap[1].to_string());
         }
         writes
+    }
+
+    /// 提取 Pinia defineStore 定义
+    pub fn extract_store_definitions(script: &str) -> Vec<StoreDefinition> {
+        if script.is_empty() {
+            return Vec::new();
+        }
+
+        let mut stores = Vec::new();
+
+        // 匹配: export const useXxxStore = defineStore('storeName', { ... })
+        // 或:   defineStore('storeName', () => { ... })
+        let re_define = Regex::new(
+            r#"defineStore\s*\(\s*['"](\w+)['"]\s*,\s*\{"#
+        ).unwrap();
+
+        for cap in re_define.captures_iter(script) {
+            let store_name = cap[1].to_string();
+            let start = cap.get(0).unwrap().end();
+            let body = extract_balanced_brace(&script[start..]);
+
+            let mut state_fields = Vec::new();
+            let mut getters = Vec::new();
+            let mut actions = Vec::new();
+
+            // 提取 state: { ... }
+            let re_state = Regex::new(r"state\s*:\s*\(\s*\)\s*\{").unwrap();
+            if let Some(m) = re_state.find(&body) {
+                let state_body = extract_balanced_brace(&body[m.end()..]);
+                let re_field = Regex::new(r#"(\w+)\s*:"#).unwrap();
+                for fcap in re_field.captures_iter(&state_body) {
+                    state_fields.push(fcap[1].to_string());
+                }
+            }
+
+            // 提取 getters: { ... }
+            let re_getters = Regex::new(r"getters\s*:\s*\{").unwrap();
+            if let Some(m) = re_getters.find(&body) {
+                let getters_body = extract_balanced_brace(&body[m.end()..]);
+                let re_fn = Regex::new(r#"(\w+)\s*(?:\(|:)"#).unwrap();
+                for fcap in re_fn.captures_iter(&getters_body) {
+                    getters.push(fcap[1].to_string());
+                }
+            }
+
+            // 提取 actions: { ... }
+            let re_actions = Regex::new(r"actions\s*:\s*\{").unwrap();
+            if let Some(m) = re_actions.find(&body) {
+                let actions_body = extract_balanced_brace(&body[m.end()..]);
+                let re_fn = Regex::new(r#"(\w+)\s*\("#).unwrap();
+                for fcap in re_fn.captures_iter(&actions_body) {
+                    actions.push(fcap[1].to_string());
+                }
+            }
+
+            stores.push(StoreDefinition {
+                name: store_name,
+                state_fields,
+                getters,
+                actions,
+            });
+        }
+
+        // 匹配 Setup Store: defineStore('name', () => { ... })
+        let re_setup = Regex::new(
+            r#"defineStore\s*\(\s*['"](\w+)['"]\s*,\s*\(\s*\)\s*=>"#
+        ).unwrap();
+
+        for cap in re_setup.captures_iter(script) {
+            let store_name = cap[1].to_string();
+            let start = cap.get(0).unwrap().end();
+            let body = extract_balanced_brace(&script[start..]);
+
+            // 提取 ref/reactive 字段
+            let mut state_fields = Vec::new();
+            let re_ref = Regex::new(r#"(\w+)\s*=\s*ref\s*\("#).unwrap();
+            for fcap in re_ref.captures_iter(&body) {
+                state_fields.push(fcap[1].to_string());
+            }
+            let re_reactive = Regex::new(r#"(\w+)\s*=\s*reactive\s*\("#).unwrap();
+            for fcap in re_reactive.captures_iter(&body) {
+                state_fields.push(fcap[1].to_string());
+            }
+
+            // 提取 computed 字段
+            let mut getters = Vec::new();
+            let re_computed = Regex::new(r#"(\w+)\s*=\s*computed\s*\("#).unwrap();
+            for fcap in re_computed.captures_iter(&body) {
+                getters.push(fcap[1].to_string());
+            }
+
+            // 提取函数（actions）
+            let mut actions = Vec::new();
+            let re_fn = Regex::new(r#"(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\([^)]*\)\s*=>)"#).unwrap();
+            for fcap in re_fn.captures_iter(&body) {
+                let name = fcap.get(1).or_else(|| fcap.get(2)).unwrap().as_str().to_string();
+                actions.push(name);
+            }
+
+            stores.push(StoreDefinition {
+                name: store_name,
+                state_fields,
+                getters,
+                actions,
+            });
+        }
+
+        stores
+    }
+
+    /// 提取 useXxxStore() 调用
+    pub fn extract_store_calls(script: &str) -> Vec<String> {
+        if script.is_empty() {
+            return Vec::new();
+        }
+
+        let mut calls = Vec::new();
+        let re = Regex::new(r#"use(\w+)Store\s*\(\s*\)"#).unwrap();
+        for cap in re.captures_iter(script) {
+            calls.push(format!("use{}Store", cap[1].to_string()));
+        }
+        calls
     }
 }
 

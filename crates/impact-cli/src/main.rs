@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use clap::{Parser, Subcommand};
 
 mod commands;
@@ -19,10 +20,20 @@ fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    let mut registry = impact_framework::AdapterRegistry::new();
-    registry.register(Box::new(impact_vue::VueAdapter::new()));
-
     match cli.command {
-        Command::Analyze(args) => commands::analyze::run(&args, &registry),
+        Command::Analyze(args) => {
+            // 解析 alias 参数
+            let mut aliases = HashMap::new();
+            for alias_str in &args.alias {
+                if let Some((key, value)) = alias_str.split_once('=') {
+                    aliases.insert(key.to_string(), value.to_string());
+                }
+            }
+
+            let mut registry = impact_framework::AdapterRegistry::new();
+            registry.register(Box::new(impact_vue::VueAdapter::with_aliases(aliases)));
+
+            commands::analyze::run(&args, &registry)
+        }
     }
 }

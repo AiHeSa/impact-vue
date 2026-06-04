@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use impact_core::analyzer::import_resolver;
@@ -10,11 +11,19 @@ use crate::sfc_parser::SfcParser;
 use crate::script_analyzer::ScriptAnalyzer;
 use crate::template_analyzer::TemplateAnalyzer;
 
-pub struct VueAdapter;
+pub struct VueAdapter {
+    aliases: HashMap<String, String>,
+}
 
 impl VueAdapter {
     pub fn new() -> Self {
-        Self
+        Self {
+            aliases: HashMap::new(),
+        }
+    }
+
+    pub fn with_aliases(aliases: HashMap<String, String>) -> Self {
+        Self { aliases }
     }
 
     fn parse_recursive(
@@ -40,7 +49,7 @@ impl VueAdapter {
 
         // 递归解析依赖
         for source in import_sources {
-            if let Some(resolved) = import_resolver::resolve_import(file, &source) {
+            if let Some(resolved) = import_resolver::resolve_import_with_aliases(file, &source, &self.aliases) {
                 if let Ok(dep_content) = std::fs::read_to_string(&resolved) {
                     self.parse_recursive(&resolved, &dep_content, depth - 1, visited, all_irs)?;
                 }

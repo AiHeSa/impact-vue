@@ -39,6 +39,9 @@ pub struct AnalyzeArgs {
 
     #[arg(long, default_value = "false", help = "Enable cross-module analysis")]
     pub cross_module: bool,
+
+    #[arg(long, help = "Path aliases, e.g. @/=src/,~=/src/ (format: alias=path)")]
+    pub alias: Vec<String>,
 }
 
 use impact_core::model::Direction;
