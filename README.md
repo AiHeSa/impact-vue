@@ -20,6 +20,14 @@ impact analyze --framework vue --entry src/Counter.vue --watch method:increment
 # 跨组件分析
 impact analyze --framework vue --entry src/App.vue --watch data:user \
   --cross-module --project-root src
+
+# 路径查询：从 A 到 B 的所有路径
+impact analyze --framework vue --entry src/App.vue --watch method:handleClick \
+  --from method:handleClick --to data:count
+
+# 使用 alias 解析 @/ 路径
+impact analyze --framework vue --entry src/App.vue --watch data:count \
+  --alias @/=src/
 ```
 
 ## CLI 参数
@@ -34,18 +42,24 @@ impact analyze --framework vue --entry src/App.vue --watch data:user \
 | `--output-mode` | 输出模式：`cli`、`report`、`both` | `both` |
 | `--cross-module` | 启用跨模块分析 | 关闭 |
 | `--project-root` | 项目根目录 | entry 所在目录 |
+| `--alias` | 路径别名，如 `@/=src/` | 无 |
+| `--from` | 路径查询起点 | 无 |
+| `--to` | 路径查询终点 | 无 |
 
 ## 支持的分析能力
 
-- **数据流**：`this.xxx` 读写、`ref()` / `reactive()` 响应式数据
-- **方法调用链**：`this.method()` 调用关系
+- **Options API**：data()、methods、computed、props、lifecycle
+- **Composition API**：ref()、reactive()、computed()、顶层函数
+- **Pinia**：defineStore 的 state/getters/actions 识别
+- **数据流**：`this.xxx` 读写、`xxx.value++` 响应式数据
+- **方法调用链**：`this.method()`、直接函数调用
 - **计算属性依赖**：computed → data/prop 依赖
 - **模板绑定**：`{{ }}`、`v-if`、`v-for`、`v-model`、`:prop`、`@event`
 - **跨组件**：props 下发、emit 事件
+- **跨文件**：import 依赖递归解析、跨文件方法调用追踪
 - **异步链路**：`await`、`.then()`、`.catch()`
-- **动态 data path**：`` `param[${index}]` `` → `param[*]`
+- **路径查询**：从 A 到 B 的所有路径（DFS，环检测）
 - **生命周期**：created、mounted 等钩子中的数据读写
-- **方向控制**：上游（谁影响目标）、下游（目标影响谁）
 
 ## 输出
 
@@ -64,8 +78,9 @@ impact analyze --framework vue --entry src/App.vue --watch data:user \
 ```
 crates/
   impact-cli/          CLI 入口 (clap)
-  impact-core/         IR、Graph、Analyzer、Reporter
+  impact-core/         IR、Graph、Analyzer、Reporter、PathFinder
   impact-framework/    FrameworkAdapter 特征
+  impact-js-ts/        JS/TS 通用分析
   impact-vue/          Vue SFC 解析、Script/Template 分析
 fixtures/              测试用例
 ```
@@ -80,16 +95,16 @@ cargo run -- analyze --framework vue --entry fixtures/vue/basic/Counter.vue --wa
 
 ## 节点类型
 
-| 类型 | 颜色（Mermaid） | 说明 |
-|------|----------------|------|
-| DataField | 绿色 | data 字段 |
-| Prop | 浅绿 | props 属性 |
-| Method | 蓝色 | methods 方法 |
-| Computed | 紫色 | computed 计算属性 |
-| Lifecycle | 橙色 | 生命周期钩子 |
-| TemplateNode | 灰色 | 模板节点 |
-| Event | 红色 | 事件 |
-| AsyncTask | 青色 | 异步任务 |
+| 类型 | 说明 |
+|------|------|
+| DataField | data 字段 / ref / reactive |
+| Prop | props 属性 |
+| Method | methods 方法 / 顶层函数 |
+| Computed | computed 计算属性 |
+| Lifecycle | 生命周期钩子 |
+| TemplateNode | 模板节点 |
+| Event | 事件 |
+| AsyncTask | 异步任务 |
 
 ## 边类型
 
