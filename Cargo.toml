@@ -4,6 +4,7 @@ members = [
     "crates/impact-core",
     "crates/impact-framework",
     "crates/impact-js-ts",
+    "crates/impact-rag",
     "crates/impact-vue",
 ]
 resolver = "2"
