@@ -84,16 +84,18 @@ impl Searcher {
         let query_lower = query.to_lowercase();
         let query_tokens: Vec<&str> = query_lower.split_whitespace().collect();
         
+        // 从 store 获取所有 chunks
         let all_chunks = self.get_all_chunks()?;
         let mut results = Vec::new();
         
         for chunk in all_chunks {
             let content_lower = chunk.content.to_lowercase();
             let name_lower = chunk.name.to_lowercase();
+            let file_lower = chunk.file_path.to_lowercase();
             
             let mut match_count = 0;
             for token in &query_tokens {
-                if content_lower.contains(token) || name_lower.contains(token) {
+                if content_lower.contains(token) || name_lower.contains(token) || file_lower.contains(token) {
                     match_count += 1;
                 }
             }
@@ -162,8 +164,7 @@ impl Searcher {
     
     /// 获取所有代码块
     fn get_all_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
-        // TODO: 实现批量获取
-        Ok(Vec::new())
+        self.store.get_all_chunks()
     }
 }
 

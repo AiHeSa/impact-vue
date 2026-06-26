@@ -15,7 +15,7 @@ pub struct EmbeddingConfig {
 }
 
 /// 嵌入提供者
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EmbeddingProvider {
     OpenAI,
     Ollama,

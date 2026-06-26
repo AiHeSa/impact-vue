@@ -166,6 +166,37 @@ impl RagStore {
         Ok(results)
     }
     
+    /// 获取所有代码块
+    pub fn get_all_chunks(&self) -> anyhow::Result<Vec<Chunk>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, file_path, language, chunk_type, name, content, start_line, end_line, metadata FROM chunks"
+        )?;
+        
+        let mut chunks = Vec::new();
+        let rows = stmt.query_map([], |row| {
+            let chunk_type_str: String = row.get(2)?;
+            let metadata_str: String = row.get(8)?;
+            
+            Ok(Chunk {
+                id: row.get(0)?,
+                file_path: row.get(1)?,
+                language: row.get(2)?,
+                chunk_type: serde_json::from_str(&chunk_type_str).unwrap_or(super::parser::ChunkType::Module),
+                name: row.get(4)?,
+                content: row.get(5)?,
+                start_line: row.get::<_, i64>(6)? as usize,
+                end_line: row.get::<_, i64>(7)? as usize,
+                metadata: serde_json::from_str(&metadata_str).unwrap_or_default(),
+            })
+        })?;
+        
+        for row in rows {
+            chunks.push(row?);
+        }
+        
+        Ok(chunks)
+    }
+    
     /// 删除文件的所有代码块
     pub fn delete_chunks_by_file(&self, file_path: &str) -> anyhow::Result<()> {
         self.conn.execute(

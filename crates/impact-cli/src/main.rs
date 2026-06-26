@@ -13,6 +13,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     Analyze(commands::analyze::AnalyzeArgs),
+    Rag(commands::rag::RagArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -35,5 +36,6 @@ fn main() -> anyhow::Result<()> {
 
             commands::analyze::run(&args, &registry)
         }
+        Command::Rag(args) => commands::rag::run(&args),
     }
 }
